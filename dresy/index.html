@@ -1876,6 +1876,22 @@ function checkSetup(){
   err.innerHTML = '<b>Aplikácia nie je nastavená:</b><br>• ' + problems.join('<br>• ') +
                   '<br><br>Ak ste appku otvorili práve počas aktualizácie, stačí to skúsiť znova.' +
                   '<br><br><button type="button" class="btn btn-sm btn-ghost" onclick="try{sessionStorage.removeItem(\'bs-opakovanie\')}catch(e){};location.reload()">Skúsiť znova</button>';
+
+  // Čo presne telefón dostal od servera — nech sa z jedného screenshotu dá
+  // povedať, či je chyba v spojení, v nahratých súboroch alebo v prehliadači
+  const chybajuce = [];
+  if (!window.BS_CONFIG) chybajuce.push('config.js');
+  if (!window.api) chybajuce.push(DEMO ? 'api-demo.js' : 'api-supabase.js');
+  Promise.all(chybajuce.map(f =>
+    fetch(f + '?kontrola=' + Date.now(), { cache: 'no-store' })
+      .then(r => f + ': ' + r.status + ' ' + (r.headers.get('content-type') || '?'))
+      .catch(e => f + ': ' + e.message)))
+  .then(riadky => {
+    err.insertAdjacentHTML('beforeend',
+      '<div class="mono" style="margin-top:12px;font-size:11px;opacity:.75;word-break:break-all;">' +
+      riadky.map(esc).join('<br>') + '<br>' + esc(location.href) + '<br>' +
+      esc(navigator.userAgent.replace(/^Mozilla\/5\.0 /, '').slice(0, 140)) + '</div>');
+  });
   err.classList.add('show');
   document.getElementById('login-btn').disabled = true;
   return false;
