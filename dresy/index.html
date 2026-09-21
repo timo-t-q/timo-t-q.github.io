@@ -489,6 +489,18 @@
   .reg-suhrn .r-hodnota{color:var(--on-dark);white-space:pre-wrap;margin-bottom:10px;display:block;}
   .reg-suhrn .r-hodnota:last-child{margin-bottom:0;}
 
+  /* Režim appky v telefóne (CFG.APPKA) — len schvaľovanie, zmeny a export.
+     Všetko ostatné v admin paneli sa skryje; web na počítači sa nemení. */
+  .appka #view-admin.active{display:flex;flex-direction:column;}
+  .appka #view-admin > :not(.v-appke){display:none !important;}
+  .appka #push-block{order:0;}
+  .appka #reg-block{order:1;}
+  .appka .changes-card{order:2;}
+  .appka #export-block{order:3;}
+  .appka .site-footer,
+  .appka [onclick="otvoritZmenuHesla()"]{display:none !important;}
+  .appka .reg-prazdne{margin:0;color:var(--on-dark-dim);font-size:14px;}
+
   /* Upozornenia do telefónu (admin) */
   .push-karta{
     display:flex;align-items:center;justify-content:space-between;gap:14px 20px;flex-wrap:wrap;
@@ -1321,7 +1333,7 @@
       <div class="card stat-card"><div class="num" id="stat-players">0</div><div class="label">Hráčov v tíme</div></div>
     </div>
 
-    <div class="changes-card">
+    <div class="changes-card v-appke">
       <div class="changes-head">
         <h3>Čo sa zmenilo od vášho posledného prihlásenia</h3>
         <button class="btn btn-ghost btn-sm" onclick="markSeen()">Označiť ako videné</button>
@@ -1341,7 +1353,7 @@
     </div>
 
     <!-- Upozornenia do telefónu — ukáže sa len tam, kde to prehliadač vie -->
-    <div class="admin-block" id="push-block" style="display:none;">
+    <div class="admin-block v-appke" id="push-block" style="display:none;">
       <div class="card push-karta" id="push-karta">
         <div>
           <h4 id="push-nadpis">Upozornenia do telefónu</h4>
@@ -1352,7 +1364,7 @@
     </div>
 
     <!-- Žiadosti rodičov o prístup -->
-    <div class="admin-block" id="reg-block" style="display:none;">
+    <div class="admin-block v-appke" id="reg-block" style="display:none;">
       <div class="block-head">
         <h3>Žiadosti o prístup <span class="kos-pocet" id="reg-pocet"></span></h3>
         <span class="kos-info">Schválením sprístupníte rodičovi dresy jeho detí</span>
@@ -1362,9 +1374,9 @@
       </div>
     </div>
 
-    <div class="admin-block">
+    <div class="admin-block v-appke" id="export-block">
       <div class="block-head">
-        <h3>Fronta žiadostí</h3>
+        <h3 id="export-nadpis">Fronta žiadostí</h3>
         <button class="btn btn-ghost btn-sm" onclick="objednavkaPreVyrobcu()">Objednávka dresov ↗</button>
         <button class="btn btn-ghost btn-sm" onclick="objednavkaStulpne()">Objednávka štulpní ↗</button>
         <button class="btn btn-ghost btn-sm" onclick="exportCsv()">Prehľad do CSV ↓</button>
@@ -1905,6 +1917,12 @@ async function enterApp(){
     if (DEMO) document.getElementById('demo-badge').style.display = '';
     document.getElementById('user-email').textContent = state.session.user.email;
     document.getElementById('user-role').textContent  = state.role === 'admin' ? 'Admin klubu' : 'Rodič / hráč';
+    // Android appka ukazuje len schvaľovanie, zmeny a export pre dodávateľov
+    if (CFG.APPKA && state.role === 'admin'){
+      document.body.classList.add('appka');
+      document.getElementById('export-nadpis').textContent = 'Export pre dodávateľov';
+    }
+
     if (state.role === 'admin') await loadAdmin();
     else                        await loadParent();
 
@@ -2340,7 +2358,9 @@ function renderDemoHint(){
    Push nenesie žiadne mená — tie sa načítajú až v appke, po prihlásení.
    V demo režime je to celé vypnuté: nie je kam posielať.
    ============================================================ */
-const PUSH_OK = !DEMO && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+// Upozornenia sú len v Android appke (CFG.APPKA) — web na počítači ich nepotrebuje
+const PUSH_OK = !DEMO && !!CFG.APPKA &&
+                'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 let swRegistracia = null;
 let swPripraveny  = Promise.resolve();   // boot() sem vloží registráciu, karta na ňu počká
 
@@ -3740,7 +3760,18 @@ function renderRegistracie(){
   const blok = document.getElementById('reg-block');
   const cakajuce = (state.registracie || []).filter(r => r.status === 'pending');
 
-  if (!cakajuce.length){ blok.style.display = 'none'; return; }
+  if (!cakajuce.length){
+    // V appke nech je vidieť, že je to vybavené — prázdna obrazovka by mátla
+    if (CFG.APPKA){
+      blok.style.display = '';
+      document.getElementById('reg-pocet').textContent = '0';
+      document.getElementById('reg-zoznam').innerHTML =
+        '<p class="reg-prazdne">Nikto nečaká na schválenie.</p>';
+    } else {
+      blok.style.display = 'none';
+    }
+    return;
+  }
   blok.style.display = '';
   document.getElementById('reg-pocet').textContent = cakajuce.length;
 

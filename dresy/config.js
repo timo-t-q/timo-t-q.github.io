@@ -23,6 +23,12 @@ window.BS_CONFIG = {
      v appke zapnúť znova — staré odbery s novým kľúčom nefungujú. */
   VAPID_PUBLIC_KEY: 'BAHX9cBHNua9fr2qmyOtBAmiZJ-kcPQn1R556z_uv2i1u565EwsdrBGHDvr38lUp9_qiYHp881A2lJi_fKfyt2M',
 
+  /* Režim Android appky „Dresy": admin vidí len schvaľovanie, zmeny
+     a export pre dodávateľov, a môže si zapnúť upozornenia do telefónu.
+     Na webe klubu je VŽDY false. Na true ho prepína publikuj-appku.js
+     v kópii, z ktorej beží appka (timo-t-q.github.io/dresy). */
+  APPKA: true,
+
   // Rozsah čísel v mriežke dresov
   NUMBER_MIN: 1,
   NUMBER_MAX: 99,
