@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "sk.warriorsflorbal.dresy",
+      "sha256_cert_fingerprints": [
+        "25:7E:8E:18:84:8C:F3:F0:C4:D0:7C:E9:3B:35:C1:B4:0A:43:C5:3A:50:12:52:45:A4:E9:54:F8:24:B5:6A:3F"
+      ]
+    }
+  }
+]
