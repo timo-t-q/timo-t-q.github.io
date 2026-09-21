@@ -1854,12 +1854,28 @@ function checkSetup(){
       problems.push('Nenačítal sa <b>api-supabase.js</b>.');
   }
 
-  if (!problems.length) return true;
+  if (!problems.length){
+    try { sessionStorage.removeItem('bs-opakovanie'); } catch (e){ /* súkromný režim */ }
+    return true;
+  }
+
+  /* Najčastejšia príčina nie je zlé nastavenie, ale zlé načasovanie: stránka
+     sa otvorila práve počas nahrávania novej verzie a jej súbory ešte neboli
+     na mieste. Jedno automatické znovunačítanie to vyrieši bez toho, aby si to
+     niekto všimol. Druhý neúspech už ukáže chybu — to je naozajstný problém. */
+  try {
+    if (!sessionStorage.getItem('bs-opakovanie')){
+      sessionStorage.setItem('bs-opakovanie', '1');
+      setTimeout(() => location.reload(), 1500);
+      return false;
+    }
+  } catch (e){ /* bez sessionStorage rovno ukážeme chybu */ }
 
   showView('login');
   const err = document.getElementById('login-error');
   err.innerHTML = '<b>Aplikácia nie je nastavená:</b><br>• ' + problems.join('<br>• ') +
-                  '<br><br>Postup nájdete v súbore README.md.';
+                  '<br><br>Ak ste appku otvorili práve počas aktualizácie, stačí to skúsiť znova.' +
+                  '<br><br><button type="button" class="btn btn-sm btn-ghost" onclick="try{sessionStorage.removeItem(\'bs-opakovanie\')}catch(e){};location.reload()">Skúsiť znova</button>';
   err.classList.add('show');
   document.getElementById('login-btn').disabled = true;
   return false;
