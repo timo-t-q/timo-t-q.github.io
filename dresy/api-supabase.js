@@ -101,7 +101,19 @@
     note:      row.note,
     createdBy: row.created_by,
     deletedAt: row.deleted_at ? new Date(row.deleted_at) : null,
+    // V ktorej výzve na platbu objednávka je (migrácia 20); null = ešte nebola
+    platbaId:  row.platba_id || null,
     ts:        new Date(row.created_at)
+  });
+
+  const toPlatba = (row) => ({
+    id:        row.id,
+    rodicia:   row.rodicia || [],
+    meno:      row.meno,
+    kontakt:   row.kontakt,
+    obsah:     Array.isArray(row.obsah) ? row.obsah : [],
+    suma:      Number(row.suma),
+    poslanaAt: new Date(row.poslana_at)
   });
 
   const toLog = (row) => ({
@@ -464,6 +476,43 @@
       const { data, error } = await sb.rpc('purge_old_trash', { dni: dni || 3 });
       if (error) { console.warn('[api] purge_old_trash:', error.message); return 0; }
       return data || 0;
+    },
+
+    /* ---- Platby rodičov (len admin, migrácia 20) ----
+       Poslaná výzva na platbu ostáva v zozname, kým ju admin neoznačí
+       ako zaplatenú — nezávisle od toho, či objednávky už spracoval. */
+
+    // Chyba = migrácia 20 ešte nebežala; appka potom ukáže starý zoznam
+    async getPlatby() {
+      const { data, error } = await sb.from('platby').select('*')
+        .eq('stav', 'poslana')
+        .order('poslana_at', { ascending: false });
+      fail(error, 'Načítanie platieb zlyhalo');
+      return (data || []).map(toPlatba);
+    },
+
+    // p = { ziadosti[], rodicia[], meno, kontakt, obsah[], suma }
+    async platbaPoslana(p) {
+      const { data, error } = await sb.rpc('platba_poslana', {
+        p_ziadosti: p.ziadosti,
+        p_rodicia:  p.rodicia,
+        p_meno:     p.meno,
+        p_kontakt:  p.kontakt || null,
+        p_obsah:    p.obsah,
+        p_suma:     p.suma
+      });
+      fail(error, 'Platbu sa nepodarilo označiť');
+      return data;
+    },
+
+    async platbaVratit(id) {
+      const { error } = await sb.rpc('platba_vratit', { p_id: id });
+      fail(error, 'Platbu sa nepodarilo vrátiť');
+    },
+
+    async platbaZaplatena(id) {
+      const { error } = await sb.rpc('platba_zaplatena', { p_id: id });
+      fail(error, 'Platbu sa nepodarilo označiť ako zaplatenú');
     },
 
     // req = { playerId, type, changes[], proposed{}, oldValue, newValue }

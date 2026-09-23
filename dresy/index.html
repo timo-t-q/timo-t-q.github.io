@@ -516,6 +516,26 @@
   .platby-suhrn{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
     padding:14px 0 6px;margin-top:4px;border-top:2px solid var(--line);font-size:14px;color:var(--on-dark-dim);}
   .platby-suhrn b{font-family:var(--font-display);font-size:24px;color:var(--on-dark);}
+  .platby-suhrn b.platby-suhrn-poslane{color:var(--info);font-size:18px;}
+  .platby-suhrn + .platby-suhrn{border-top:0;margin-top:0;padding-top:4px;}
+
+  /* Evidencia platieb: „Treba poslať" → „Poslané, čaká sa na peniaze" → preč */
+  .platby-sekcia{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+    margin:14px 0 0;padding-bottom:6px;border-bottom:1px solid var(--line);
+    font-family:var(--font-mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--on-dark-dim);}
+  .platby-sekcia:first-child{margin-top:8px;}
+  .platby-sekcia b{font-family:var(--font-display);font-size:15px;letter-spacing:0;color:var(--on-dark);}
+  .platba-akcie{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px;}
+  .platba-akcie .btn-sm{padding:6px 12px;}
+  .btn-poslana{background:var(--coral-soft);border-color:var(--coral);color:var(--coral);}
+  .btn-poslana:hover{background:var(--coral);color:var(--dark);}
+  .btn-zaplatene{background:var(--success-soft);border-color:var(--success);color:var(--success);}
+  .btn-zaplatene:hover{background:var(--success);color:var(--dark);}
+  .platba-stitok{font-family:var(--font-mono);font-size:11px;color:var(--info);background:var(--info-soft);
+    padding:3px 8px;border-radius:999px;white-space:nowrap;}
+  .platba.poslana .platba-suma{color:var(--info);}
+  .platba-vybavena{font-family:var(--font-mono);font-size:10.5px;color:var(--on-dark-dim);opacity:.8;}
+  .platby-pozn{font-size:12px;color:var(--on-dark-dim);margin:10px 0 2px;}
 
   /* Upozornenia do telefónu (admin) */
   .push-karta{
@@ -1407,11 +1427,11 @@
       </div>
     </div>
 
-    <!-- Kto koľko platí — z objednávok, ktoré čakajú, zoskupené podľa rodiča -->
+    <!-- Kto koľko platí — zoskupené podľa rodiča; poslané platby ostávajú, kým nie sú zaplatené -->
     <div class="admin-block v-appke" id="platby-block">
       <div class="block-head">
         <h3>Kto koľko platí <span class="kos-pocet" id="platby-pocet"></span></h3>
-        <span class="kos-info">Z objednávok, ktoré čakajú na spracovanie</span>
+        <span class="kos-info" id="platby-info">Z objednávok, ktoré čakajú na spracovanie</span>
         <button class="btn btn-ghost btn-sm" onclick="dokumentPlatby()">Vytlačiť ↗</button>
       </div>
       <div class="card" style="padding:4px 18px 10px;">
@@ -1617,6 +1637,7 @@ const state = {
   changesSince:    [],
   kos:             [],   // zahodené žiadosti (kôš)
   registracie:     [],   // žiadosti rodičov o prístup
+  platby:          null, // poslané výzvy na platbu; null = evidencia nie je (migrácia 20)
   playersSort:     'birth'   // 'birth' = podľa ročníka (predvolené) | 'number'
 };
 
@@ -3613,6 +3634,7 @@ async function loadAdmin(){
   let registracie = [];
   try { registracie = await api.getRegistrations(); }
   catch (e){ console.warn('[app] registrácie sa nenačítali:', e.message); }
+  state.platby = await nacitajPlatby();
   state.adminLastLogin = lastLogin || new Date(0);
   state.players   = players;
   state.requests  = requests;
@@ -4840,26 +4862,70 @@ function exportCsv(){
 }
 
 /* ---- Kto koľko platí ----
-   Z čakajúcich objednávok (rovnaké zoskupenie ako objednávka pre výrobcu),
-   ale po RODIČOCH — platí rodič, nie dieťa. Rodič s dvoma deťmi má jeden
+   Po RODIČOCH — platí rodič, nie dieťa. Rodič s dvoma deťmi má jeden
    riadok a jednu sumu. Ceny počíta vypocitajCenu(), takže sedí aj zľava
    za celú sadu presne tak, ako ju videl rodič pri objednávaní.
 
+   S evidenciou platieb (migrácia 20) má zoznam dve časti:
+     • Treba poslať — objednávky, za ktoré rodič výzvu ešte nedostal.
+       Aj už spracované: platba sa rieši nezávisle od toho, či kusy
+       odišli k výrobcovi.
+     • Poslané — ostávajú, kým ich admin neoznačí ako zaplatené. Suma je
+       uložená tak, ako odišla rodičovi, takže ju nezmení ani nový cenník.
+   Bez migrácie ostáva pôvodné správanie: len čakajúce, bez tlačidiel.
+
    Hráč bez rodiča v portáli (objednávku zadal admin) má riadok zvlášť —
    klub musí vedieť, od koho peniaze pýtať, aj keď to portál nevie. ---- */
+
+// null = evidencia platieb nie je (migrácia 20 nebežala, alebo staré demo)
+async function nacitajPlatby(){
+  if (typeof api.getPlatby !== 'function') return null;
+  try { return await api.getPlatby(); }
+  catch (e){ console.warn('[app] evidencia platieb nie je k dispozícii:', e.message); return null; }
+}
+
+function evidenciaPlatieb(){ return Array.isArray(state.platby); }
+
+// Objednávky, za ktoré ešte neodišla výzva na platbu — po hráčoch
+function objednavkyNaPlatbu(){
+  if (!evidenciaPlatieb()){
+    return zoskupCakajuce().polozky.map(z =>
+      ({ hrac: z.hrac, kusy: z.kusy, ziadosti: [], vybavena: false }));
+  }
+
+  const skupiny = new Map();
+  state.requests.slice().sort((a, b) => a.ts - b.ts).forEach(r => {
+    if (r.status === 'rejected' || r.platbaId) return;
+    const kody = kusyZoZiadosti(r);
+    const p = state.players.find(x => x.id === r.playerId);
+    if (!kody.length || !p) return;
+
+    // Čakajúce sa zlučujú ako v objednávke pre výrobcu. Vybavené zvlášť —
+    // tie išli v inom kole, takže rovnaký kus je naozaj ďalší kus.
+    const vybavena = r.status !== 'pending';
+    const kluc = p.id + (vybavena ? ':v' : ':c');
+    if (!skupiny.has(kluc)) skupiny.set(kluc, { hrac: p, kusy: [], ziadosti: [], vybavena });
+    const z = skupiny.get(kluc);
+    z.ziadosti.push(r.id);
+    kody.forEach(x => { if (z.kusy.indexOf(x) === -1) z.kusy.push(x); });
+  });
+  return [...skupiny.values()];
+}
+
 function platbyPodlaRodica(){
-  const { polozky } = zoskupCakajuce();
   const skupiny = new Map();
 
-  polozky.forEach(z => {
+  objednavkyNaPlatbu().forEach(z => {
     const p = z.hrac;
     const cena = vypocitajCenu(z.kusy, p);
     const rodicia = rodiciaHraca(p).slice().sort();
     const kluc = rodicia.length ? rodicia.join('+') : 'hrac-' + p.id;
 
-    if (!skupiny.has(kluc)) skupiny.set(kluc, { rodicia, deti: [], spolu: 0, chybaCena: false });
+    if (!skupiny.has(kluc)) skupiny.set(kluc,
+      { kluc, rodicia, deti: [], ziadosti: [], spolu: 0, chybaCena: false });
     const s = skupiny.get(kluc);
-    s.deti.push({ hrac: p, cena });
+    s.deti.push({ hrac: p, cena, vybavena: z.vybavena });
+    s.ziadosti.push(...z.ziadosti);
     s.spolu += cena.spolu;
     if (cena.chybaCena) s.chybaCena = true;
   });
@@ -4881,71 +4947,246 @@ function obsahPlatby(cena){
   return cena.polozky.map(x => x.kod === 'sada' ? 'celá sada' : x.nazov.toLowerCase()).join(' + ');
 }
 
-function renderPlatby(){
-  const zoznam = document.getElementById('platby-zoznam');
-  const pocet  = document.getElementById('platby-pocet');
-  if (!zoznam) return;
+function kontaktSkupiny(s){
+  return s.rodicia.map(kontaktRodica).filter(Boolean).join(' / ');
+}
 
-  const skupiny = platbyPodlaRodica();
-  if (!skupiny.length){
-    pocet.textContent = '';
-    zoznam.innerHTML = '<p class="reg-prazdne" style="padding:12px 0;">Žiadna objednávka nečaká — nikto zatiaľ nič neplatí.</p>';
-    return;
-  }
+function datumPlatby(d){
+  return new Date(d).toLocaleDateString('sk-SK', { day: 'numeric', month: 'numeric' });
+}
 
-  const spolu = skupiny.reduce((s, x) => s + x.spolu, 0);
-  const neuplne = skupiny.some(x => x.chybaCena);
-  pocet.textContent = skupiny.length;
+// Jedno dieťa v platbe — rovnaký riadok pre neposlané aj poslané
+function riadokDietata(text, suma, vybavena){
+  return '<li><span>' + esc(text) +
+      (vybavena ? ' <small class="platba-vybavena">· už objednané</small>' : '') + '</span>' +
+    '<span>' + (typeof suma === 'number' ? eur(suma) : '?') + '</span></li>';
+}
 
-  zoznam.innerHTML = skupiny.map(s =>
-    '<div class="platba">' +
-      '<div class="platba-hlava">' +
-        '<div>' +
-          (s.meno
-            ? '<b>' + esc(s.meno) + '</b>' +
-              '<span class="platba-kontakt">' + esc(s.rodicia.map(kontaktRodica).filter(Boolean).join(' / ') || '—') + '</span>'
-            : '<b class="platba-bez">Bez rodiča v portáli</b>' +
-              '<span class="platba-kontakt">objednávku zadal klub — platbu treba vybaviť osobne</span>') +
-        '</div>' +
-        '<span class="platba-suma">' + (s.chybaCena ? 'cena chýba' : eur(s.spolu)) + '</span>' +
+function htmlPlatbyNaPoslanie(s){
+  const tlacidlo = !evidenciaPlatieb() ? '' :
+    '<div class="platba-akcie">' +
+      '<button type="button" class="btn btn-sm btn-poslana" data-kluc="' + esc(s.kluc) + '"' +
+        (s.chybaCena ? ' disabled title="Niektorý kus nemá v cenníku cenu"' : '') +
+        ' onclick="oznacPlatbuPoslanu(this)">Platba poslaná</button>' +
+    '</div>';
+
+  return '<div class="platba">' +
+    '<div class="platba-hlava">' +
+      '<div>' +
+        (s.meno
+          ? '<b>' + esc(s.meno) + '</b>' +
+            '<span class="platba-kontakt">' + esc(kontaktSkupiny(s) || '—') + '</span>'
+          : '<b class="platba-bez">Bez rodiča v portáli</b>' +
+            '<span class="platba-kontakt">objednávku zadal klub — platbu treba vybaviť osobne</span>') +
       '</div>' +
-      '<ul class="platba-deti">' + s.deti.map(d =>
-        '<li><span>' + esc(cisloHraca(d.hrac) + ' ' + d.hrac.fullname) + ' — ' + esc(obsahPlatby(d.cena)) + '</span>' +
-        '<span>' + (d.cena.chybaCena ? '?' : eur(d.cena.spolu)) + '</span></li>'
-      ).join('') + '</ul>' +
-    '</div>'
-  ).join('') +
-  '<div class="platby-suhrn">' +
-    '<span>Spolu — ' + kusov(skupiny.length, 'platba', 'platby', 'platieb') + '</span>' +
-    '<b>' + (neuplne ? 'neúplné' : eur(spolu)) + '</b>' +
+      '<span class="platba-suma">' + (s.chybaCena ? 'cena chýba' : eur(s.spolu)) + '</span>' +
+    '</div>' +
+    '<ul class="platba-deti">' + s.deti.map(d =>
+      riadokDietata(cisloHraca(d.hrac) + ' ' + d.hrac.fullname + ' — ' + obsahPlatby(d.cena),
+                    d.cena.chybaCena ? null : d.cena.spolu, d.vybavena)
+    ).join('') + '</ul>' +
+    tlacidlo +
   '</div>';
 }
 
-// Tlačová verzia pre pokladníka — rovnaký vzhľad ako objednávky pre výrobcu
-function dokumentPlatby(){
-  const skupiny = platbyPodlaRodica();
-  if (!skupiny.length){
-    showToast('Žiadna objednávka nečaká — nie je čo vytlačiť.', true);
+// Poslaná platba sa kreslí z uloženého záznamu — tak, ako odišla rodičovi
+function htmlPoslanejPlatby(p){
+  return '<div class="platba poslana">' +
+    '<div class="platba-hlava">' +
+      '<div><b>' + esc(p.meno) + '</b>' +
+        '<span class="platba-kontakt">' + esc(p.kontakt || '—') + '</span></div>' +
+      '<span class="platba-suma">' + eur(p.suma) + '</span>' +
+    '</div>' +
+    '<ul class="platba-deti">' + p.obsah.map(d =>
+      riadokDietata((d.hrac || '') + (d.co ? ' — ' + d.co : ''),
+                    typeof d.suma === 'number' ? d.suma : null, false)
+    ).join('') + '</ul>' +
+    '<div class="platba-akcie">' +
+      '<span class="platba-stitok">poslaná ' + esc(datumPlatby(p.poslanaAt)) + '</span>' +
+      '<button type="button" class="btn btn-sm btn-zaplatene" onclick="oznacPlatbuZaplatenu(' + p.id + ')">Zaplatené</button>' +
+      '<button type="button" class="btn btn-sm btn-ghost" onclick="vratitPlatbu(' + p.id + ', this)">Späť</button>' +
+    '</div>' +
+  '</div>';
+}
+
+function hlavickaSekciePlatieb(nazov, pocet){
+  return '<div class="platby-sekcia"><span>' + esc(nazov) + '</span><b>' + pocet + '</b></div>';
+}
+
+function renderPlatby(){
+  const zoznam = document.getElementById('platby-zoznam');
+  const pocet  = document.getElementById('platby-pocet');
+  const info   = document.getElementById('platby-info');
+  if (!zoznam) return;
+
+  const evidencia  = evidenciaPlatieb();
+  const naPoslanie = platbyPodlaRodica();
+  const poslane    = evidencia ? state.platby : [];
+  state.platbyNaPoslanie = naPoslanie;   // tlačidlo „Platba poslaná" si v nich nájde svoj riadok
+
+  if (info) info.textContent = evidencia
+    ? 'Poslaná platba ostáva v zozname, kým ju neoznačíte ako zaplatenú'
+    : 'Z objednávok, ktoré čakajú na spracovanie';
+
+  if (!naPoslanie.length && !poslane.length){
+    pocet.textContent = '';
+    zoznam.innerHTML = '<p class="reg-prazdne" style="padding:12px 0;">' +
+      (evidencia ? 'Nikto nič nedlhuje — žiadna platba nečaká.'
+                 : 'Žiadna objednávka nečaká — nikto zatiaľ nič neplatí.') + '</p>';
     return;
   }
-  const spolu = skupiny.reduce((s, x) => s + x.spolu, 0);
-  const chyba = skupiny.filter(x => x.chybaCena)
+  pocet.textContent = naPoslanie.length + poslane.length;
+
+  const spoluNaPoslanie = naPoslanie.reduce((s, x) => s + x.spolu, 0);
+  const neuplne = naPoslanie.some(x => x.chybaCena);
+  const spoluPoslane = poslane.reduce((s, x) => s + x.suma, 0);
+
+  zoznam.innerHTML =
+    (naPoslanie.length
+      ? (evidencia ? hlavickaSekciePlatieb('Treba poslať', naPoslanie.length) : '') +
+        naPoslanie.map(htmlPlatbyNaPoslanie).join('')
+      : '') +
+    (poslane.length
+      ? hlavickaSekciePlatieb('Poslané — čaká sa na peniaze', poslane.length) +
+        poslane.map(htmlPoslanejPlatby).join('')
+      : '') +
+    (naPoslanie.length
+      ? '<div class="platby-suhrn">' +
+          '<span>' + (evidencia ? 'Treba poslať' : 'Spolu') + ' — ' +
+            kusov(naPoslanie.length, 'platba', 'platby', 'platieb') + '</span>' +
+          '<b>' + (neuplne ? 'neúplné' : eur(spoluNaPoslanie)) + '</b>' +
+        '</div>'
+      : '') +
+    (poslane.length
+      ? '<div class="platby-suhrn">' +
+          '<span>Poslané, ešte nezaplatené — ' + kusov(poslane.length, 'platba', 'platby', 'platieb') + '</span>' +
+          '<b class="platby-suhrn-poslane">' + eur(spoluPoslane) + '</b>' +
+        '</div>'
+      : '') +
+    (!evidencia && !DEMO
+      ? '<p class="platby-pozn">Tlačidlo „Platba poslaná" sa zapne po spustení migrácie 20.</p>'
+      : '');
+}
+
+// Po zmene platby stačí znova načítať objednávky a platby — nie celý admin
+async function obnovPlatby(){
+  const [requests, platby] = await Promise.all([api.getRequests(), nacitajPlatby()]);
+  state.requests = requests;
+  state.platby   = platby;
+  renderPlatby();
+}
+
+async function obnovPlatbyPoChybe(e){
+  showToast(e.message, true);
+  try { await obnovPlatby(); }
+  catch (e2){ console.error('[app] platby sa nepodarilo obnoviť:', e2); renderPlatby(); }
+}
+
+async function oznacPlatbuPoslanu(btn){
+  const s = (state.platbyNaPoslanie || []).find(x => x.kluc === btn.dataset.kluc);
+  if (!s || !s.ziadosti.length) return;
+
+  btn.disabled = true;
+  btn.textContent = 'Ukladám…';
+  try {
+    await api.platbaPoslana({
+      ziadosti: s.ziadosti,
+      rodicia:  s.rodicia,
+      meno:     s.meno || 'Bez rodiča v portáli',
+      kontakt:  kontaktSkupiny(s),
+      obsah:    s.deti.map(d => ({
+        hrac: cisloHraca(d.hrac) + ' ' + d.hrac.fullname,
+        co:   obsahPlatby(d.cena),
+        suma: d.cena.spolu
+      })),
+      suma: s.spolu
+    });
+    await obnovPlatby();
+    showToast('Platba poslaná — ' + (s.meno || 'bez rodiča v portáli') + ', ' + eur(s.spolu) +
+              '. Ostane v zozname, kým ju neoznačíte ako zaplatenú.');
+  } catch (e){
+    await obnovPlatbyPoChybe(e);
+  }
+}
+
+function oznacPlatbuZaplatenu(id){
+  const p = (state.platby || []).find(x => x.id === id);
+  if (!p) return;
+  openDanger('Platba zaplatená?',
+    p.meno + ' — ' + eur(p.suma) + '\n\nPlatba zo zoznamu zmizne. Urobte to, až keď peniaze naozaj prišli.',
+    async () => {
+      try {
+        await api.platbaZaplatena(id);
+        await obnovPlatby();
+        showToast('Zaplatené — ' + p.meno + ', ' + eur(p.suma) + '.');
+      } catch (e){
+        await obnovPlatbyPoChybe(e);
+      }
+    },
+    'Áno, zaplatené');
+}
+
+// Omylom označená platba — objednávky sa vrátia medzi „Treba poslať"
+async function vratitPlatbu(id, btn){
+  btn.disabled = true;
+  try {
+    await api.platbaVratit(id);
+    await obnovPlatby();
+    showToast('Platba vrátená medzi tie, ktoré treba poslať.');
+  } catch (e){
+    await obnovPlatbyPoChybe(e);
+  }
+}
+
+// Tlačová verzia pre pokladníka — rovnaký vzhľad ako objednávky pre výrobcu
+function tabulkaPlatieb(nazov, riadky, spolu, pocet){
+  return '<h2>' + esc(nazov) + '</h2>' +
+    '<table><thead><tr><th>Rodič</th><th>Za koho a čo</th><th style="text-align:right">Suma</th></tr></thead><tbody>' +
+    riadky.map(r =>
+      '<tr><td style="vertical-align:top"><b>' + esc(r.meno) + '</b><br>' +
+        '<span style="color:#666;font-size:12px">' + esc(r.kontakt) + '</span></td>' +
+      '<td style="vertical-align:top">' + r.deti.map(esc).join('<br>') + '</td>' +
+      '<td style="vertical-align:top;text-align:right;white-space:nowrap"><b>' + esc(r.suma) + '</b></td></tr>'
+    ).join('') +
+    '</tbody></table>' +
+    '<div class="suhrn"><b>Spolu:</b> ' + esc(spolu) +
+      ' — ' + esc(kusov(pocet, 'platba', 'platby', 'platieb')) + '</div>';
+}
+
+function dokumentPlatby(){
+  const evidencia  = evidenciaPlatieb();
+  const naPoslanie = platbyPodlaRodica();
+  const poslane    = evidencia ? state.platby : [];
+  if (!naPoslanie.length && !poslane.length){
+    showToast('Nikto nič neplatí — nie je čo vytlačiť.', true);
+    return;
+  }
+  const chyba = naPoslanie.filter(x => x.chybaCena)
     .map(x => esc(x.meno || 'Bez rodiča v portáli') + ' — niektorý kus nemá v cenníku cenu');
 
   const telo =
-    '<h2>Platby rodičov</h2>' +
-    '<table><thead><tr><th>Rodič</th><th>Za koho a čo</th><th style="text-align:right">Suma</th></tr></thead><tbody>' +
-    skupiny.map(s =>
-      '<tr><td style="vertical-align:top"><b>' + esc(s.meno || 'Bez rodiča v portáli') + '</b><br>' +
-        '<span style="color:#666;font-size:12px">' + esc(s.rodicia.map(kontaktRodica).filter(Boolean).join(' / ')) + '</span></td>' +
-      '<td style="vertical-align:top">' + s.deti.map(d =>
-        esc(cisloHraca(d.hrac) + ' ' + d.hrac.fullname) + ' — ' + esc(obsahPlatby(d.cena))).join('<br>') + '</td>' +
-      '<td style="vertical-align:top;text-align:right;white-space:nowrap"><b>' +
-        (s.chybaCena ? '?' : esc(eur(s.spolu))) + '</b></td></tr>'
-    ).join('') +
-    '</tbody></table>' +
-    '<div class="suhrn"><b>Spolu:</b> ' + esc(chyba.length ? 'neúplné' : eur(spolu)) +
-      ' — ' + esc(kusov(skupiny.length, 'platba', 'platby', 'platieb')) + '</div>';
+    (naPoslanie.length
+      ? tabulkaPlatieb(evidencia ? 'Treba poslať' : 'Platby rodičov',
+          naPoslanie.map(s => ({
+            meno:    s.meno || 'Bez rodiča v portáli',
+            kontakt: kontaktSkupiny(s),
+            deti:    s.deti.map(d => cisloHraca(d.hrac) + ' ' + d.hrac.fullname + ' — ' + obsahPlatby(d.cena)),
+            suma:    s.chybaCena ? '?' : eur(s.spolu)
+          })),
+          chyba.length ? 'neúplné' : eur(naPoslanie.reduce((s, x) => s + x.spolu, 0)),
+          naPoslanie.length)
+      : '') +
+    (poslane.length
+      ? tabulkaPlatieb('Poslané — čaká sa na peniaze',
+          poslane.map(p => ({
+            meno:    p.meno,
+            kontakt: [p.kontakt, 'poslaná ' + datumPlatby(p.poslanaAt)].filter(Boolean).join(' · '),
+            deti:    p.obsah.map(d => (d.hrac || '') + (d.co ? ' — ' + d.co : '')),
+            suma:    eur(p.suma)
+          })),
+          eur(poslane.reduce((s, x) => s + x.suma, 0)),
+          poslane.length)
+      : '');
 
   dokumentVyrobcu('platby za dresy', telo, chyba.length ? chyba.join('<br>') : null);
 }
