@@ -4969,11 +4969,14 @@ function riadokDietata(text, suma, vybavena){
 }
 
 function htmlPlatbyNaPoslanie(s){
+  // „Zaplatené" rovno odtiaľto — keď rodič zaplatí bez výzvy (napr. v hotovosti)
+  const zamknute = s.chybaCena ? ' disabled title="Niektorý kus nemá v cenníku cenu"' : '';
   const tlacidlo = !evidenciaPlatieb() ? '' :
     '<div class="platba-akcie">' +
-      '<button type="button" class="btn btn-sm btn-poslana" data-kluc="' + esc(s.kluc) + '"' +
-        (s.chybaCena ? ' disabled title="Niektorý kus nemá v cenníku cenu"' : '') +
+      '<button type="button" class="btn btn-sm btn-poslana" data-kluc="' + esc(s.kluc) + '"' + zamknute +
         ' onclick="oznacPlatbuPoslanu(this)">Platba poslaná</button>' +
+      '<button type="button" class="btn btn-sm btn-zaplatene" data-kluc="' + esc(s.kluc) + '"' + zamknute +
+        ' onclick="oznacPlatbuRovnoZaplatenu(this)">Zaplatené</button>' +
     '</div>';
 
   return '<div class="platba">' +
@@ -5104,14 +5107,16 @@ async function obnovPlatbyPoChybe(e){
   catch (e2){ console.error('[app] platby sa nepodarilo obnoviť:', e2); renderPlatby(); }
 }
 
-async function oznacPlatbuPoslanu(btn){
+// Riadok z „Treba poslať" sa uloží ako platba — tak, ako ho admin vidí
+async function ulozPlatbu(btn, ajZaplatena){
   const s = (state.platbyNaPoslanie || []).find(x => x.kluc === btn.dataset.kluc);
   if (!s || !s.ziadosti.length) return;
 
-  btn.disabled = true;
+  btn.closest('.platba-akcie').querySelectorAll('button').forEach(b => { b.disabled = true; });
   btn.textContent = 'Ukladám…';
+  const meno = s.meno || 'bez rodiča v portáli';
   try {
-    await api.platbaPoslana({
+    const id = await api.platbaPoslana({
       ziadosti: s.ziadosti,
       rodicia:  s.rodicia,
       meno:     s.meno || 'Bez rodiča v portáli',
@@ -5123,13 +5128,18 @@ async function oznacPlatbuPoslanu(btn){
       })),
       suma: s.spolu
     });
+    if (ajZaplatena) await api.platbaZaplatena(id);
     await obnovPlatby();
-    showToast('Platba poslaná — ' + (s.meno || 'bez rodiča v portáli') + ', ' + eur(s.spolu) +
-              '. Keď peniaze prídu, kliknite na Zaplatené.');
+    showToast(ajZaplatena
+      ? 'Zaplatené — ' + meno + ', ' + eur(s.spolu) + '. Platba ostáva v zozname.'
+      : 'Platba poslaná — ' + meno + ', ' + eur(s.spolu) + '. Keď peniaze prídu, kliknite na Zaplatené.');
   } catch (e){
     await obnovPlatbyPoChybe(e);
   }
 }
+
+function oznacPlatbuPoslanu(btn){ return ulozPlatbu(btn, false); }
+function oznacPlatbuRovnoZaplatenu(btn){ return ulozPlatbu(btn, true); }
 
 // Spoločný priebeh tlačidiel pri uloženej platbe: zamkni, zavolaj, obnov, oznám
 async function akciaPlatby(btn, volanie, sprava){
