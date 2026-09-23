@@ -524,7 +524,7 @@
     margin:14px 0 0;padding-bottom:6px;border-bottom:1px solid var(--line);
     font-family:var(--font-mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--on-dark-dim);}
   .platby-sekcia:first-child{margin-top:8px;}
-  .platby-sekcia b{font-family:var(--font-display);font-size:15px;letter-spacing:0;color:var(--on-dark);}
+  .platby-sekcia b{font-family:var(--font-mono);font-size:12px;letter-spacing:0;color:var(--on-dark);}
   .platba-akcie{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px;}
   .platba-akcie .btn-sm{padding:6px 12px;}
   .btn-poslana{background:var(--coral-soft);border-color:var(--coral);color:var(--coral);}
@@ -534,6 +534,10 @@
   .platba-stitok{font-family:var(--font-mono);font-size:11px;color:var(--info);background:var(--info-soft);
     padding:3px 8px;border-radius:999px;white-space:nowrap;}
   .platba.poslana .platba-suma{color:var(--info);}
+  .platba.zaplatena .platba-suma{color:var(--success);}
+  .platba.zaplatena b{opacity:.85;}
+  .platba-stitok.zaplatena{color:var(--success);background:var(--success-soft);}
+  .platby-suhrn b.platby-suhrn-zaplatene{color:var(--success);font-size:18px;}
   .platba-vybavena{font-family:var(--font-mono);font-size:10.5px;color:var(--on-dark-dim);opacity:.8;}
   .platby-pozn{font-size:12px;color:var(--on-dark-dim);margin:10px 0 2px;}
 
@@ -1427,7 +1431,7 @@
       </div>
     </div>
 
-    <!-- Kto koľko platí — zoskupené podľa rodiča; poslané platby ostávajú, kým nie sú zaplatené -->
+    <!-- Kto koľko platí — zoskupené podľa rodiča; poslané aj zaplatené platby ostávajú v zozname -->
     <div class="admin-block v-appke" id="platby-block">
       <div class="block-head">
         <h3>Kto koľko platí <span class="kos-pocet" id="platby-pocet"></span></h3>
@@ -4866,12 +4870,14 @@ function exportCsv(){
    riadok a jednu sumu. Ceny počíta vypocitajCenu(), takže sedí aj zľava
    za celú sadu presne tak, ako ju videl rodič pri objednávaní.
 
-   S evidenciou platieb (migrácia 20) má zoznam dve časti:
+   S evidenciou platieb (migrácia 20) má zoznam tri časti:
      • Treba poslať — objednávky, za ktoré rodič výzvu ešte nedostal.
        Aj už spracované: platba sa rieši nezávisle od toho, či kusy
        odišli k výrobcovi.
-     • Poslané — ostávajú, kým ich admin neoznačí ako zaplatené. Suma je
-       uložená tak, ako odišla rodičovi, takže ju nezmení ani nový cenník.
+     • Poslané — čaká sa na peniaze. Suma je uložená tak, ako odišla
+       rodičovi, takže ju nezmení ani nový cenník.
+     • Zaplatené — v zozname ostávajú, nech admin vidí, kto už zaplatil.
+   Každý krok sa dá vrátiť tlačidlom „Späť".
    Bez migrácie ostáva pôvodné správanie: len čakajúce, bez tlačidiel.
 
    Hráč bez rodiča v portáli (objednávku zadal admin) má riadok zvlášť —
@@ -4990,8 +4996,18 @@ function htmlPlatbyNaPoslanie(s){
 }
 
 // Poslaná platba sa kreslí z uloženého záznamu — tak, ako odišla rodičovi
+// Poslaná aj zaplatená platba — líši sa len štítkom a tlačidlami.
+// „Späť" pri poslanej ju vráti medzi Treba poslať, pri zaplatenej medzi poslané.
 function htmlPoslanejPlatby(p){
-  return '<div class="platba poslana">' +
+  const zaplatena = p.stav === 'zaplatena';
+  const akcie = zaplatena
+    ? '<span class="platba-stitok zaplatena">✓ zaplatené ' + esc(datumPlatby(p.zaplatenaAt || p.poslanaAt)) + '</span>' +
+      '<button type="button" class="btn btn-sm btn-ghost" onclick="zrusitZaplatenie(' + p.id + ', this)">Späť</button>'
+    : '<span class="platba-stitok">poslaná ' + esc(datumPlatby(p.poslanaAt)) + '</span>' +
+      '<button type="button" class="btn btn-sm btn-zaplatene" onclick="oznacPlatbuZaplatenu(' + p.id + ', this)">Zaplatené</button>' +
+      '<button type="button" class="btn btn-sm btn-ghost" onclick="vratitPlatbu(' + p.id + ', this)">Späť</button>';
+
+  return '<div class="platba ' + (zaplatena ? 'zaplatena' : 'poslana') + '">' +
     '<div class="platba-hlava">' +
       '<div><b>' + esc(p.meno) + '</b>' +
         '<span class="platba-kontakt">' + esc(p.kontakt || '—') + '</span></div>' +
@@ -5001,11 +5017,14 @@ function htmlPoslanejPlatby(p){
       riadokDietata((d.hrac || '') + (d.co ? ' — ' + d.co : ''),
                     typeof d.suma === 'number' ? d.suma : null, false)
     ).join('') + '</ul>' +
-    '<div class="platba-akcie">' +
-      '<span class="platba-stitok">poslaná ' + esc(datumPlatby(p.poslanaAt)) + '</span>' +
-      '<button type="button" class="btn btn-sm btn-zaplatene" onclick="oznacPlatbuZaplatenu(' + p.id + ')">Zaplatené</button>' +
-      '<button type="button" class="btn btn-sm btn-ghost" onclick="vratitPlatbu(' + p.id + ', this)">Späť</button>' +
-    '</div>' +
+    '<div class="platba-akcie">' + akcie + '</div>' +
+  '</div>';
+}
+
+function suhrnPlatieb(nazov, pocet, suma, trieda){
+  return '<div class="platby-suhrn">' +
+    '<span>' + esc(nazov) + ' — ' + kusov(pocet, 'platba', 'platby', 'platieb') + '</span>' +
+    '<b' + (trieda ? ' class="' + trieda + '"' : '') + '>' + esc(suma) + '</b>' +
   '</div>';
 }
 
@@ -5021,25 +5040,27 @@ function renderPlatby(){
 
   const evidencia  = evidenciaPlatieb();
   const naPoslanie = platbyPodlaRodica();
-  const poslane    = evidencia ? state.platby : [];
+  const poslane    = evidencia ? state.platby.filter(p => p.stav !== 'zaplatena') : [];
+  const zaplatene  = evidencia ? state.platby.filter(p => p.stav === 'zaplatena')
+                                   .sort((a, b) => (b.zaplatenaAt || 0) - (a.zaplatenaAt || 0)) : [];
   state.platbyNaPoslanie = naPoslanie;   // tlačidlo „Platba poslaná" si v nich nájde svoj riadok
 
   if (info) info.textContent = evidencia
-    ? 'Poslaná platba ostáva v zozname, kým ju neoznačíte ako zaplatenú'
+    ? 'Poslané aj zaplatené platby ostávajú v zozname'
     : 'Z objednávok, ktoré čakajú na spracovanie';
 
-  if (!naPoslanie.length && !poslane.length){
+  if (!naPoslanie.length && !poslane.length && !zaplatene.length){
     pocet.textContent = '';
     zoznam.innerHTML = '<p class="reg-prazdne" style="padding:12px 0;">' +
-      (evidencia ? 'Nikto nič nedlhuje — žiadna platba nečaká.'
+      (evidencia ? 'Zatiaľ žiadne platby.'
                  : 'Žiadna objednávka nečaká — nikto zatiaľ nič neplatí.') + '</p>';
     return;
   }
-  pocet.textContent = naPoslanie.length + poslane.length;
+  // Číslo pri nadpise = čo ešte treba riešiť; zaplatené sa nerátajú
+  pocet.textContent = (naPoslanie.length + poslane.length) || '';
 
-  const spoluNaPoslanie = naPoslanie.reduce((s, x) => s + x.spolu, 0);
+  const spolu = zoz => zoz.reduce((s, x) => s + x.suma, 0);
   const neuplne = naPoslanie.some(x => x.chybaCena);
-  const spoluPoslane = poslane.reduce((s, x) => s + x.suma, 0);
 
   zoznam.innerHTML =
     (naPoslanie.length
@@ -5050,18 +5071,19 @@ function renderPlatby(){
       ? hlavickaSekciePlatieb('Poslané — čaká sa na peniaze', poslane.length) +
         poslane.map(htmlPoslanejPlatby).join('')
       : '') +
+    (zaplatene.length
+      ? hlavickaSekciePlatieb('Zaplatené', zaplatene.length) +
+        zaplatene.map(htmlPoslanejPlatby).join('')
+      : '') +
     (naPoslanie.length
-      ? '<div class="platby-suhrn">' +
-          '<span>' + (evidencia ? 'Treba poslať' : 'Spolu') + ' — ' +
-            kusov(naPoslanie.length, 'platba', 'platby', 'platieb') + '</span>' +
-          '<b>' + (neuplne ? 'neúplné' : eur(spoluNaPoslanie)) + '</b>' +
-        '</div>'
+      ? suhrnPlatieb(evidencia ? 'Treba poslať' : 'Spolu', naPoslanie.length,
+          neuplne ? 'neúplné' : eur(naPoslanie.reduce((s, x) => s + x.spolu, 0)))
       : '') +
     (poslane.length
-      ? '<div class="platby-suhrn">' +
-          '<span>Poslané, ešte nezaplatené — ' + kusov(poslane.length, 'platba', 'platby', 'platieb') + '</span>' +
-          '<b class="platby-suhrn-poslane">' + eur(spoluPoslane) + '</b>' +
-        '</div>'
+      ? suhrnPlatieb('Poslané, ešte nezaplatené', poslane.length, eur(spolu(poslane)), 'platby-suhrn-poslane')
+      : '') +
+    (zaplatene.length
+      ? suhrnPlatieb('Zaplatené', zaplatene.length, eur(spolu(zaplatene)), 'platby-suhrn-zaplatene')
       : '') +
     (!evidencia && !DEMO
       ? '<p class="platby-pozn">Tlačidlo „Platba poslaná" sa zapne po spustení migrácie 20.</p>'
@@ -5103,39 +5125,42 @@ async function oznacPlatbuPoslanu(btn){
     });
     await obnovPlatby();
     showToast('Platba poslaná — ' + (s.meno || 'bez rodiča v portáli') + ', ' + eur(s.spolu) +
-              '. Ostane v zozname, kým ju neoznačíte ako zaplatenú.');
+              '. Keď peniaze prídu, kliknite na Zaplatené.');
   } catch (e){
     await obnovPlatbyPoChybe(e);
   }
 }
 
-function oznacPlatbuZaplatenu(id){
+// Spoločný priebeh tlačidiel pri uloženej platbe: zamkni, zavolaj, obnov, oznám
+async function akciaPlatby(btn, volanie, sprava){
+  if (btn) btn.disabled = true;
+  try {
+    await volanie();
+    await obnovPlatby();
+    showToast(sprava);
+  } catch (e){
+    await obnovPlatbyPoChybe(e);
+  }
+}
+
+// Zaplatená platba v zozname ostáva — admin vidí, kto už zaplatil
+function oznacPlatbuZaplatenu(id, btn){
   const p = (state.platby || []).find(x => x.id === id);
   if (!p) return;
-  openDanger('Platba zaplatená?',
-    p.meno + ' — ' + eur(p.suma) + '\n\nPlatba zo zoznamu zmizne. Urobte to, až keď peniaze naozaj prišli.',
-    async () => {
-      try {
-        await api.platbaZaplatena(id);
-        await obnovPlatby();
-        showToast('Zaplatené — ' + p.meno + ', ' + eur(p.suma) + '.');
-      } catch (e){
-        await obnovPlatbyPoChybe(e);
-      }
-    },
-    'Áno, zaplatené');
+  return akciaPlatby(btn, () => api.platbaZaplatena(id),
+    'Zaplatené — ' + p.meno + ', ' + eur(p.suma) + '. Platba ostáva v zozname.');
 }
 
-// Omylom označená platba — objednávky sa vrátia medzi „Treba poslať"
-async function vratitPlatbu(id, btn){
-  btn.disabled = true;
-  try {
-    await api.platbaVratit(id);
-    await obnovPlatby();
-    showToast('Platba vrátená medzi tie, ktoré treba poslať.');
-  } catch (e){
-    await obnovPlatbyPoChybe(e);
-  }
+// Omylom označená ako zaplatená — vráti sa medzi poslané
+function zrusitZaplatenie(id, btn){
+  return akciaPlatby(btn, () => api.platbaNezaplatena(id),
+    'Platba vrátená medzi poslané — čaká sa na peniaze.');
+}
+
+// Omylom označená ako poslaná — objednávky sa vrátia medzi „Treba poslať"
+function vratitPlatbu(id, btn){
+  return akciaPlatby(btn, () => api.platbaVratit(id),
+    'Platba vrátená medzi tie, ktoré treba poslať.');
 }
 
 // Tlačová verzia pre pokladníka — rovnaký vzhľad ako objednávky pre výrobcu
@@ -5153,12 +5178,23 @@ function tabulkaPlatieb(nazov, riadky, spolu, pocet){
       ' — ' + esc(kusov(pocet, 'platba', 'platby', 'platieb')) + '</div>';
 }
 
+// Uložená platba ako riadok tlačovej tabuľky
+function riadokUlozenejPlatby(p, datum){
+  return {
+    meno:    p.meno,
+    kontakt: [p.kontakt, datum].filter(Boolean).join(' · '),
+    deti:    p.obsah.map(d => (d.hrac || '') + (d.co ? ' — ' + d.co : '')),
+    suma:    eur(p.suma)
+  };
+}
+
 function dokumentPlatby(){
   const evidencia  = evidenciaPlatieb();
   const naPoslanie = platbyPodlaRodica();
-  const poslane    = evidencia ? state.platby : [];
-  if (!naPoslanie.length && !poslane.length){
-    showToast('Nikto nič neplatí — nie je čo vytlačiť.', true);
+  const poslane    = evidencia ? state.platby.filter(p => p.stav !== 'zaplatena') : [];
+  const zaplatene  = evidencia ? state.platby.filter(p => p.stav === 'zaplatena') : [];
+  if (!naPoslanie.length && !poslane.length && !zaplatene.length){
+    showToast('Zatiaľ žiadne platby — nie je čo vytlačiť.', true);
     return;
   }
   const chyba = naPoslanie.filter(x => x.chybaCena)
@@ -5178,14 +5214,15 @@ function dokumentPlatby(){
       : '') +
     (poslane.length
       ? tabulkaPlatieb('Poslané — čaká sa na peniaze',
-          poslane.map(p => ({
-            meno:    p.meno,
-            kontakt: [p.kontakt, 'poslaná ' + datumPlatby(p.poslanaAt)].filter(Boolean).join(' · '),
-            deti:    p.obsah.map(d => (d.hrac || '') + (d.co ? ' — ' + d.co : '')),
-            suma:    eur(p.suma)
-          })),
+          poslane.map(p => riadokUlozenejPlatby(p, 'poslaná ' + datumPlatby(p.poslanaAt))),
           eur(poslane.reduce((s, x) => s + x.suma, 0)),
           poslane.length)
+      : '') +
+    (zaplatene.length
+      ? tabulkaPlatieb('Zaplatené',
+          zaplatene.map(p => riadokUlozenejPlatby(p, 'zaplatené ' + datumPlatby(p.zaplatenaAt || p.poslanaAt))),
+          eur(zaplatene.reduce((s, x) => s + x.suma, 0)),
+          zaplatene.length)
       : '');
 
   dokumentVyrobcu('platby za dresy', telo, chyba.length ? chyba.join('<br>') : null);

@@ -113,7 +113,9 @@
     kontakt:   row.kontakt,
     obsah:     Array.isArray(row.obsah) ? row.obsah : [],
     suma:      Number(row.suma),
-    poslanaAt: new Date(row.poslana_at)
+    stav:      row.stav,          // 'poslana' | 'zaplatena'
+    poslanaAt: new Date(row.poslana_at),
+    zaplatenaAt: row.zaplatena_at ? new Date(row.zaplatena_at) : null
   });
 
   const toLog = (row) => ({
@@ -479,13 +481,13 @@
     },
 
     /* ---- Platby rodičov (len admin, migrácia 20) ----
-       Poslaná výzva na platbu ostáva v zozname, kým ju admin neoznačí
-       ako zaplatenú — nezávisle od toho, či objednávky už spracoval. */
+       Poslané aj zaplatené ostávajú v zozname — nezávisle od toho,
+       či admin objednávky už spracoval. Archív sa nenačítava. */
 
     // Chyba = migrácia 20 ešte nebežala; appka potom ukáže starý zoznam
     async getPlatby() {
       const { data, error } = await sb.from('platby').select('*')
-        .eq('stav', 'poslana')
+        .in('stav', ['poslana', 'zaplatena'])
         .order('poslana_at', { ascending: false });
       fail(error, 'Načítanie platieb zlyhalo');
       return (data || []).map(toPlatba);
@@ -513,6 +515,11 @@
     async platbaZaplatena(id) {
       const { error } = await sb.rpc('platba_zaplatena', { p_id: id });
       fail(error, 'Platbu sa nepodarilo označiť ako zaplatenú');
+    },
+
+    async platbaNezaplatena(id) {
+      const { error } = await sb.rpc('platba_nezaplatena', { p_id: id });
+      fail(error, 'Platbu sa nepodarilo vrátiť medzi poslané');
     },
 
     // req = { playerId, type, changes[], proposed{}, oldValue, newValue }
