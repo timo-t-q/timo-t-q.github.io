@@ -156,7 +156,7 @@
     if (/rate limit|too many|after [0-9]+ seconds/i.test(m))
       return 'Odkaz sme práve poslali. Počkajte chvíľu a skúste znova.';
     if (/signups not allowed/i.test(m))
-      return 'Na tento e-mail zatiaľ nemáte konto. Požiadajte klub o prístup.';
+      return 'Na tento e-mail zatiaľ nemáte konto. Vráťte sa späť a kliknite na „Zaregistrujte sa".';
     // Supabase poštu neodoslal — vypadol SMTP, minula sa kvóta alebo je
     // odosielacia doména ešte neoverená. Rodič s tým nevie nič spraviť,
     // tak nemá zmysel ukazovať mu anglickú hlášku zo servera.
@@ -203,7 +203,8 @@
       });
       if (error) {
         if (/already registered|already exists/i.test(error.message)) {
-          throw new Error('Na tento e-mail už konto existuje — skúste sa prihlásiť.');
+          throw new Error('Na tento e-mail už konto existuje. Ak heslo nepoznáte, vráťte sa na prihlásenie ' +
+                          'a kliknite na „Zabudli ste heslo?" — pošleme vám odkaz.');
         }
         if (/password/i.test(error.message) && /least|short/i.test(error.message)) {
           throw new Error('Heslo je príliš krátke — použite aspoň 6 znakov.');
@@ -222,7 +223,14 @@
     async sendMagicLink(email) {
       const { error } = await sb.auth.signInWithOtp({
         email: (email || '').trim(),
-        options: { emailRedirectTo: window.location.origin + window.location.pathname }
+        options: {
+          emailRedirectTo: window.location.origin + window.location.pathname,
+          /* Bez tohto Supabase na neznámy e-mail potichu ZALOŽÍ konto.
+             Rodič sa potom prihlási odkazom, nemá heslo ani žiadosť,
+             a keď skúsi „Zaregistrujte sa", dozvie sa, že konto už má.
+             Presne tak uviazol 23. 9. rodič s dvoma prázdnymi kontami. */
+          shouldCreateUser: false
+        }
       });
       if (error) {
         const zrozumitelna = chybaOdkazu(error);
